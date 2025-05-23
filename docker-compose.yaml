@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    user: root
+    ports:
+      - "443:5678"   # host 443 → container 5678 (HTTPS)
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=admin
+      - N8N_PROTOCOL=https
+      - N8N_HOST=ideationmax.info   # your public hostname, not localhost
+      - N8N_PORT=5678
+      - WEBHOOK_URL=https://ideationmax.info
+      - N8N_SSL_KEY=/certs/privkey.pem
+      - N8N_SSL_CERT=/certs/fullchain.pem
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=n8npass
+      - N8N_SECURE_COOKIE=false
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - /opt/n8n/certs:/certs:ro
+    depends_on:
+      - postgres
+    restart: always
+
+  postgres:
+    image: postgres:latest
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=n8n
+      - POSTGRES_PASSWORD=n8npass
+      - POSTGRES_DB=n8n
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+volumes:
+  n8n_data:
+  postgres_data:
