@@ -65,6 +65,22 @@ services:
       - twilio_api
     restart: always
 
+  call_log:
+    image: mysql:8
+    container_name: call_log
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ai_voice
+      MYSQL_USER: voiceuser
+      MYSQL_PASSWORD: voicepass
+    ports:
+      - "3306:3306"
+    volumes:
+      - call_log_mysql_data:/var/lib/mysql
+      - ./init:/docker-entrypoint-initdb.d  # ✅ run all .sql scripts on first start
+    restart: always
+
 volumes:
   n8n_data:
   postgres_data:
+  call_log_mysql_data:

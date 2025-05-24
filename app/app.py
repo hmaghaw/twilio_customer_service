@@ -4,25 +4,68 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.twiml.voice_response import VoiceResponse, Gather
 import os
 from openai import OpenAI
+import mysql.connector
 
 #openai.api_key = os.environ["OPENAI_API_KEY"]
 api_key = "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"
 app = Flask(__name__)
 
-# In-memory session store (can be replaced with Redis or DB)
-session_memory = {}
+def get_connection():
+    return mysql.connector.connect(
+        host="call_log",
+        user="voiceuser",
+        password="voicepass",
+        database="ai_voice"
+    )
 
-def get_conversation(session_id):
-    return session_memory.get(session_id, [
-        {"role": "system", "content": "You are a helpful and concise phone assistant."}
-    ])
+def update_conversation(call_sid, role, message):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO conversation_log (call_sid, role, message)
+        VALUES (%s, %s, %s)
+    """, (call_sid, role, message))
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-def update_conversation(session_id, user_input, ai_reply):
-    if session_id not in session_memory:
-        session_memory[session_id] = []
-    session_memory[session_id].append({"role": "user", "content": user_input})
-    session_memory[session_id].append({"role": "assistant", "content": ai_reply})
-    session_memory[session_id] = session_memory[session_id][-6:]  # Keep last 6 messages
+def get_conversation(call_sid):
+    conn = get_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT role, message FROM conversation_log
+        WHERE call_sid = %s
+        ORDER BY created_at ASC
+    """, (call_sid,))
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    # Convert to OpenAI-style messages
+    messages = [{"role": row["role"], "content": row["message"]} for row in rows]
+    if not any(m["role"] == "system" for m in messages):
+        messages.insert(0, {
+            "role": "system",
+            "content": "You are a helpful and concise phone assistant."
+        })
+    return messages
+
+def get_ai_reply(call_sid, user_input):
+    update_conversation(call_sid, "user", user_input)
+    messages = get_conversation(call_sid)
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=messages
+        )
+        ai_reply = response.choices[0].message.content
+        update_conversation(call_sid, "assistant", ai_reply)
+    except Exception as e:
+        print(e)
+        ai_reply = "I'm having trouble with Chat GPT responding right now. Please try again later."
+    return ai_reply
+
 
 @app.route("/ai_intro", methods=["POST"])
 def ai_intro():
@@ -48,7 +91,7 @@ def ai_gather():
 
 @app.route("/ai_process", methods=["POST"])
 def ai_process():
-    session_id = request.form.get("CallSid", "default")
+    call_sid = request.form.get("CallSid", "default")
     user_input = request.form.get("SpeechResult", "").strip()
     print(f"user_input: {user_input}")
 
@@ -58,26 +101,7 @@ def ai_process():
         vr.redirect("/ai_gather")
         return Response(str(vr), mimetype="application/xml")
 
-    #messages = get_conversation(session_id)
-    messages = [
-        {"role": "system", "content": "You are a helpful and concise phone assistant."}
-    ]
-    messages.append({"role": "user", "content": user_input})
-
-    try:
-        client = OpenAI(api_key=api_key)
-
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=messages
-        )
-
-        ai_reply = response.choices[0].message.content
-    except Exception as e:
-        print(e)
-        ai_reply = "I'm having trouble with Chat GPT responding right now. Please try again later."
-
-    update_conversation(session_id, user_input, ai_reply)
+    ai_reply = get_ai_reply(call_sid, user_input)
 
     vr = VoiceResponse()
     vr.say(ai_reply, voice="alice")
