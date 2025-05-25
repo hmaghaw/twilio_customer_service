@@ -66,7 +66,6 @@ def get_ai_reply(call_sid, user_input):
         ai_reply = "I'm having trouble with Chat GPT responding right now. Please try again later."
     return ai_reply
 
-
 @app.route("/ai_intro", methods=["POST"])
 def ai_intro():
     resp = VoiceResponse()
