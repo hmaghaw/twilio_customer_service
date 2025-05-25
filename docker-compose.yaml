@@ -35,5 +35,35 @@ services:
       - ./init:/docker-entrypoint-initdb.d  # ✅ run all .sql scripts on first start
     restart: always
 
+  dental_clinic_db:
+    image: mysql:8.0
+    container_name: dental_clinic_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: dental_clinic
+      MYSQL_USER: clinicuser
+      MYSQL_PASSWORD: clinicpass
+    ports:
+      - "3307:3306"
+    volumes:
+      - dental_clinic_data:/var/lib/mysql
+      - ./init_dental_clinic:/docker-entrypoint-initdb.d
+    restart: always
+
+  dental_clinic_api:
+    image: python:3.11
+    container_name: dental_clinic_api
+    working_dir: /app
+    volumes:
+      - ./dental_clinic_app:/app
+    ports:
+      - "5001:5000"
+    depends_on:
+      - dental_clinic_db
+    command: >
+      sh -c "pip install -r requirements.txt && python dental_api.py"
+    restart: always
+
 volumes:
   twilio_call_log_data:
+  dental_clinic_data:

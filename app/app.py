@@ -50,7 +50,7 @@ def get_conversation(call_sid):
     return messages
 
 def get_ai_reply(call_sid, user_input):
-    url = "https://ideationmax.info/webhook/94b76b3b-95e3-4cb8-88db-6db6bc63e70a"
+    url = "https://ideationmax.info/webhook/9f16b8f8-71c9-414a-9467-de9b666d6b52"
     payload = {
         "call_sid": call_sid,
         "user_input": user_input
