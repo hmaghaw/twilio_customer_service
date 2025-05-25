@@ -15,14 +15,14 @@ services:
       - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     depends_on:
-      - call_log
+      - twilio_call_log
     command: >
-      sh -c "pip install -r requirements.txt && python app.py"
+      sh -c "pip install -r /app/requirements.txt && python app.py"
     restart: always
 
-  call_log:
+  twilio_call_log:
     image: mysql:8
-    container_name: call_log
+    container_name: twilio_call_log
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: ai_voice
@@ -31,9 +31,9 @@ services:
     ports:
       - "3306:3306"
     volumes:
-      - call_log_mysql_data:/var/lib/mysql
+      - twilio_call_log_data:/var/lib/mysql
       - ./init:/docker-entrypoint-initdb.d  # ✅ run all .sql scripts on first start
     restart: always
 
 volumes:
-  call_log_mysql_data:
+  twilio_call_log_data:

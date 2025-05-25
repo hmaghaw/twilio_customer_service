@@ -5,14 +5,13 @@ from twilio.twiml.voice_response import VoiceResponse, Gather
 import os
 from openai import OpenAI
 import mysql.connector
+import requests
 
-#openai.api_key = os.environ["OPENAI_API_KEY"]
-api_key = "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"
 app = Flask(__name__)
 
 def get_connection():
     return mysql.connector.connect(
-        host="call_log",
+        host="twilio_call_log",
         user="voiceuser",
         password="voicepass",
         database="ai_voice"
@@ -51,19 +50,17 @@ def get_conversation(call_sid):
     return messages
 
 def get_ai_reply(call_sid, user_input):
+    url = "https://ideationmax.info/webhook/94b76b3b-95e3-4cb8-88db-6db6bc63e70a"
+    payload = {
+        "call_sid": call_sid,
+        "user_input": user_input
+    }
+
+    response = requests.post(url, json=payload)
+
+    ai_reply = response.json()['ai_reply']
     update_conversation(call_sid, "user", user_input)
-    messages = get_conversation(call_sid)
-    try:
-        client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=messages
-        )
-        ai_reply = response.choices[0].message.content
-        update_conversation(call_sid, "assistant", ai_reply)
-    except Exception as e:
-        print(e)
-        ai_reply = "I'm having trouble with Chat GPT responding right now. Please try again later."
+
     return ai_reply
 
 @app.route("/ai_intro", methods=["POST"])
