@@ -77,6 +77,14 @@ def list_dentists():
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT full_name, specialization, working_days, start_time, end_time FROM dentist")
     dentists = cursor.fetchall()
+
+    # 🔧 Convert time fields to string
+    for d in dentists:
+        if isinstance(d.get("start_time"), (str, type(None))) is False:
+            d["start_time"] = str(d["start_time"])
+        if isinstance(d.get("end_time"), (str, type(None))) is False:
+            d["end_time"] = str(d["end_time"])
+
     cursor.close()
     conn.close()
     return jsonify(dentists), 200
@@ -121,5 +129,46 @@ def list_treatment_history(phone_number):
     conn.close()
     return jsonify(history), 200
 
+@app.route("/appointments/phone/<phone_number>", methods=["GET"])
+def get_appointments_by_phone(phone_number):
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT patient_id FROM patient WHERE phone = %s", (phone_number,))
+    patient = cursor.fetchone()
+    if not patient:
+        cursor.close()
+        conn.close()
+        return jsonify({"success": False, "message": "Patient not found."}), 404
+
+    patient_id = patient["patient_id"]
+    cursor.execute("""
+        SELECT 
+            a.appointment_id,
+            a.scheduled_date,
+            a.start_time,
+            a.end_time,
+            a.status,
+            a.notes,
+            d.full_name AS dentist_name,
+            s.name AS service_name
+        FROM appointment a
+        JOIN dentist d ON a.dentist_id = d.dentist_id
+        JOIN service s ON a.service_id = s.service_id
+        WHERE a.patient_id = %s
+        ORDER BY a.scheduled_date DESC
+    """, (patient_id,))
+    appointments = cursor.fetchall()
+
+    # 🔧 Fix non-serializable time fields
+    for a in appointments:
+        if isinstance(a.get("start_time"), (str, type(None))) is False:
+            a["start_time"] = str(a["start_time"])
+        if isinstance(a.get("end_time"), (str, type(None))) is False:
+            a["end_time"] = str(a["end_time"])
+
+    cursor.close()
+    conn.close()
+    return jsonify(appointments), 200
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=True)
