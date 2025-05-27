@@ -45,130 +45,79 @@ def get_patient_by_phone(phone_number):
 @app.route("/patients/phone/<phone_number>", methods=["PUT"])
 def update_patient_by_phone(phone_number):
     data = request.json
+    if not data:
+        return jsonify({"success": False, "message": "No data provided."}), 400
+
+    allowed_fields = ["full_name", "phone", "email", "dob", "notes"]
+    set_clauses = []
+    values = []
+
+    for field in allowed_fields:
+        if field in data:
+            set_clauses.append(f"{field} = %s")
+            values.append(data[field])
+
+    if not set_clauses:
+        return jsonify({"success": False, "message": "No valid fields to update."}), 400
+
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE patient SET full_name=%s, phone=%s, email=%s, dob=%s, notes=%s
-        WHERE phone=%s
-    """, (data["full_name"], data["phone"], data.get("email"), data.get("dob"), data.get("notes"), phone_number))
+
+    # Check if phone number exists
+    cursor.execute("SELECT 1 FROM patient WHERE phone = %s", (phone_number,))
+    if cursor.fetchone() is None:
+        cursor.close()
+        conn.close()
+        return jsonify({"success": False, "message": "Patient with given phone number not found."}), 404
+
+    # Build and execute update
+    values.append(phone_number)
+    query = f"""
+        UPDATE patient
+        SET {', '.join(set_clauses)}
+        WHERE phone = %s
+    """
+    cursor.execute(query, values)
     conn.commit()
+
     cursor.close()
     conn.close()
+
     return jsonify({"success": True, "message": "Patient updated."}), 200
 
+
 @app.route("/appointments", methods=["POST"])
-def book_appointment():
+def create_appointment():
     data = request.json
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO appointment (patient_id, dentist_id, service_id, scheduled_date, start_time, end_time, status, notes)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-    """, (data["patient_id"], data["dentist_id"], data["service_id"], data["scheduled_date"],
-          data["start_time"], data["end_time"], "Scheduled", data.get("notes")))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return jsonify({"success": True, "message": "Appointment booked."}), 201
-
-@app.route("/dentists", methods=["GET"])
-def list_dentists():
-    conn = get_db()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT full_name, specialization, working_days, start_time, end_time FROM dentist")
-    dentists = cursor.fetchall()
-
-    # 🔧 Convert time fields to string
-    for d in dentists:
-        if isinstance(d.get("start_time"), (str, type(None))) is False:
-            d["start_time"] = str(d["start_time"])
-        if isinstance(d.get("end_time"), (str, type(None))) is False:
-            d["end_time"] = str(d["end_time"])
-
-    cursor.close()
-    conn.close()
-    return jsonify(dentists), 200
-
-@app.route("/appointments/<int:appointment_id>", methods=["PUT"])
-def modify_appointment(appointment_id):
-    data = request.json
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE appointment
-        SET scheduled_date=%s, start_time=%s, end_time=%s, status=%s, notes=%s
-        WHERE appointment_id=%s
-    """, (data["scheduled_date"], data["start_time"], data["end_time"], data["status"], data.get("notes"), appointment_id))
+        INSERT INTO appointment (patient_id, schedule_id, service_id, status, notes)
+        VALUES (%s, %s, %s, %s, %s)
+    """, (
+        data["patient_id"],
+        data["schedule_id"],
+        data["service_id"],
+        data.get("status", "Scheduled"),
+        data.get("notes")
+    ))
     conn.commit()
     cursor.close()
     conn.close()
     return jsonify({"success": True, "message": "Appointment updated."}), 200
 
-@app.route("/treatment-history/<phone_number>", methods=["GET"])
-def list_treatment_history(phone_number):
+@app.route("/appointments/<int:appointment_id>", methods=["GET"])
+def get_appointment(appointment_id):
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT patient_id FROM patient WHERE phone = %s", (phone_number,))
+    cursor.execute("SELECT * FROM appointment WHERE appointment_id = %s", (appointment_id,))
     result = cursor.fetchone()
-    if not result:
-        cursor.close()
-        conn.close()
-        return jsonify({"success": False, "message": "Patient not found."}), 404
-
-    patient_id = result["patient_id"]
-    cursor.execute("""
-        SELECT th.treatment_date, s.name AS service_name, th.description, th.tooth_number, th.procedure_code
-        FROM treatment_history th
-        JOIN appointment a ON th.appointment_id = a.appointment_id
-        JOIN service s ON th.service_id = s.service_id
-        WHERE a.patient_id = %s
-        ORDER BY th.treatment_date DESC
-    """, (patient_id,))
-    history = cursor.fetchall()
     cursor.close()
     conn.close()
-    return jsonify(history), 200
-
-@app.route("/appointments/phone/<phone_number>", methods=["GET"])
-def get_appointments_by_phone(phone_number):
-    conn = get_db()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT patient_id FROM patient WHERE phone = %s", (phone_number,))
-    patient = cursor.fetchone()
-    if not patient:
-        cursor.close()
-        conn.close()
-        return jsonify({"success": False, "message": "Patient not found."}), 404
-
-    patient_id = patient["patient_id"]
-    cursor.execute("""
-        SELECT 
-            a.appointment_id,
-            a.scheduled_date,
-            a.start_time,
-            a.end_time,
-            a.status,
-            a.notes,
-            d.full_name AS dentist_name,
-            s.name AS service_name
-        FROM appointment a
-        JOIN dentist d ON a.dentist_id = d.dentist_id
-        JOIN service s ON a.service_id = s.service_id
-        WHERE a.patient_id = %s
-        ORDER BY a.scheduled_date DESC
-    """, (patient_id,))
-    appointments = cursor.fetchall()
-
-    # 🔧 Fix non-serializable time fields
-    for a in appointments:
-        if isinstance(a.get("start_time"), (str, type(None))) is False:
-            a["start_time"] = str(a["start_time"])
-        if isinstance(a.get("end_time"), (str, type(None))) is False:
-            a["end_time"] = str(a["end_time"])
-
-    cursor.close()
-    conn.close()
-    return jsonify(appointments), 200
+    if result:
+        return jsonify(result), 200
+    else:
+        return jsonify({"success": False, "message": "Appointment not found"}), 404
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True)
