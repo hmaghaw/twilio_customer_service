@@ -68,7 +68,7 @@ def update_patient_by_phone(phone_number):
     if cursor.fetchone() is None:
         cursor.close()
         conn.close()
-        return jsonify({"success": False, "message": "Patient with given phone number not found."}), 404
+        return jsonify({"success": False, "message": "Patient with given phone number not found."}), 429
 
     # Build and execute update
     values.append(phone_number)
@@ -85,26 +85,72 @@ def update_patient_by_phone(phone_number):
 
     return jsonify({"success": True, "message": "Patient updated."}), 200
 
-
 @app.route("/appointments", methods=["POST"])
-def create_appointment():
+def create_appointment_from_details():
     data = request.json
+    phone = data.get("phone")
+    date = data.get("date")
+    time = data.get("time")
+    dentist_name = data.get("dentist_name")  # optional
+
+    if not all([phone, date, time]):
+        return jsonify({"success": False, "message": "Missing required fields."}), 400
+
     conn = get_db()
     cursor = conn.cursor()
+
+    # Get patient_id by phone
+    cursor.execute("SELECT patient_id FROM patient WHERE phone = %s", (phone,))
+    patient = cursor.fetchone()
+    if not patient:
+        return jsonify({"success": False, "message": "Patient not found."}), 404
+    patient_id = patient[0]
+
+    # If dentist_name is given, find the matching schedule
+    if dentist_name:
+        cursor.execute("SELECT dentist_id FROM dentist WHERE full_name = %s", (dentist_name,))
+        dentist = cursor.fetchone()
+        if not dentist:
+            return jsonify({"success": False, "message": "Dentist not found."}), 404
+        dentist_id = dentist[0]
+
+        cursor.execute("""
+            SELECT schedule_id FROM schedule
+            WHERE date = %s AND slot_start = %s AND dentist_id = %s AND status = 'available'
+        """, (date, time, dentist_id))
+    else:
+        # If no dentist_name provided, find any available schedule for the date and time
+        cursor.execute("""
+            SELECT schedule_id FROM schedule
+            WHERE date = %s AND slot_start = %s AND status = 'available'
+            LIMIT 1
+        """, (date, time))
+
+    schedule = cursor.fetchone()
+    if not schedule:
+        return jsonify({"success": False, "message": "This time slot is not available"}), 200
+
+    schedule_id = schedule[0]
+
+    # Insert appointment
     cursor.execute("""
-        INSERT INTO appointment (patient_id, schedule_id, service_id, status, notes)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (
-        data["patient_id"],
-        data["schedule_id"],
-        data["service_id"],
-        data.get("status", "Scheduled"),
-        data.get("notes")
-    ))
+        INSERT INTO appointment (patient_id, schedule_id, status)
+        VALUES (%s, %s, %s)
+    """, (patient_id, schedule_id, "Scheduled"))
+
+    # Mark the schedule as booked
+    cursor.execute("""
+        UPDATE schedule
+        SET status = 'booked'
+        WHERE schedule_id = %s
+    """, (schedule_id,))
+
     conn.commit()
     cursor.close()
     conn.close()
-    return jsonify({"success": True, "message": "Appointment updated."}), 200
+
+    return jsonify({"success": True, "message": "Appointment created."}), 201
+
 
 @app.route("/appointments/<int:appointment_id>", methods=["GET"])
 def get_appointment(appointment_id):
@@ -117,7 +163,48 @@ def get_appointment(appointment_id):
     if result:
         return jsonify(result), 200
     else:
-        return jsonify({"success": False, "message": "Appointment not found"}), 404
+        return jsonify({"success": False, "message": "Appointment not found"}), 429
+
+@app.route("/schedule/available", methods=["POST"])
+def get_next_available_times():
+    data = request.json
+    date = data.get("date")
+    shift = data.get("shift", "Anything")  # Default to no filter
+
+    if not date:
+        return jsonify({"success": False, "message": "Missing 'date' in request."}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # Dynamic query
+    if shift in ("Morning", "Afternoon"):
+        cursor.execute("""
+            SELECT DISTINCT date, slot_start
+            FROM schedule
+            WHERE status = 'available'
+              AND date >= %s
+              AND shift = %s
+            ORDER BY date ASC, slot_start ASC
+            LIMIT 3
+        """, (date, shift))
+    else:
+        cursor.execute("""
+            SELECT DISTINCT date, slot_start
+            FROM schedule
+            WHERE status = 'available'
+              AND date >= %s
+            ORDER BY date ASC, slot_start ASC
+            LIMIT 3
+        """, (date,))
+
+    rows = cursor.fetchall()
+    times = [f"{str(row[1])[:4]}" for row in rows]
+
+    cursor.close()
+    conn.close()
+
+    return jsonify({"success": True, "times": times}), 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)
