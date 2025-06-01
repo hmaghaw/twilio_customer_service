@@ -57,7 +57,7 @@ services:
     volumes:
       - ./dental_clinic_app:/app
     ports:
-      - "5001:5000"
+      - "5001:5001"
     depends_on:
       - dental_clinic_db
     command: >

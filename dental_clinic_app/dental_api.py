@@ -29,7 +29,7 @@ def create_patient():
     conn.close()
     return jsonify({"success": True, "message": "Patient created."}), 201
 
-@app.route("/patients/phone/<phone_number>", methods=["GET"])
+@app.route("/patients/<phone_number>", methods=["GET"])
 def get_patient_by_phone(phone_number):
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
@@ -41,49 +41,6 @@ def get_patient_by_phone(phone_number):
         return jsonify(patient), 200
     else:
         return jsonify({"success": False, "message": "Patient not found."}), 404
-
-@app.route("/patients/phone/<phone_number>", methods=["PUT"])
-def update_patient_by_phone(phone_number):
-    data = request.json
-    if not data:
-        return jsonify({"success": False, "message": "No data provided."}), 400
-
-    allowed_fields = ["full_name", "phone", "email", "dob", "notes"]
-    set_clauses = []
-    values = []
-
-    for field in allowed_fields:
-        if field in data:
-            set_clauses.append(f"{field} = %s")
-            values.append(data[field])
-
-    if not set_clauses:
-        return jsonify({"success": False, "message": "No valid fields to update."}), 400
-
-    conn = get_db()
-    cursor = conn.cursor()
-
-    # Check if phone number exists
-    cursor.execute("SELECT 1 FROM patient WHERE phone = %s", (phone_number,))
-    if cursor.fetchone() is None:
-        cursor.close()
-        conn.close()
-        return jsonify({"success": False, "message": "Patient with given phone number not found."}), 429
-
-    # Build and execute update
-    values.append(phone_number)
-    query = f"""
-        UPDATE patient
-        SET {', '.join(set_clauses)}
-        WHERE phone = %s
-    """
-    cursor.execute(query, values)
-    conn.commit()
-
-    cursor.close()
-    conn.close()
-
-    return jsonify({"success": True, "message": "Patient updated."}), 200
 
 @app.route("/appointments", methods=["POST"])
 def create_appointment_from_details():
@@ -205,6 +162,50 @@ def get_next_available_times():
     conn.close()
 
     return jsonify({"success": True, "times": times}), 200
+
+@app.route("/patients/modify", methods=["PUT"])
+def modify_patient():
+    data = request.json
+    phone = data.get("phone")
+
+    if not phone:
+        return jsonify({"success": False, "message": "Missing phone to identify patient."}), 400
+
+    fields_to_update = ["full_name", "phone", "email", "dob", "notes"]
+    set_clauses = []
+    values = []
+
+    for field in fields_to_update:
+        if field in data and field != "phone":
+            set_clauses.append(f"{field} = %s")
+            values.append(data[field])
+
+    if not set_clauses:
+        return jsonify({"success": False, "message": "No fields provided for update."}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # Check if patient with given phone exists
+    cursor.execute("SELECT patient_id FROM patient WHERE phone = %s", (phone,))
+    patient = cursor.fetchone()
+    if not patient:
+        cursor.close()
+        conn.close()
+        return jsonify({"success": False, "message": "Patient not found."}), 404
+
+    # Append original phone at the end for WHERE clause
+    values.append(phone)
+
+    # Run the update query
+    query = f"UPDATE patient SET {', '.join(set_clauses)} WHERE phone = %s"
+    cursor.execute(query, values)
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return jsonify({"success": True, "message": "Patient record updated."}), 200
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)

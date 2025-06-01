@@ -33,28 +33,25 @@ CREATE TABLE dentist_service_eligibility (
 );
 
 
--- Schedule Table
 CREATE TABLE schedule (
     schedule_id INT AUTO_INCREMENT PRIMARY KEY,
     date DATE NOT NULL,
     shift ENUM('Morning', 'Afternoon') NOT NULL,
     slot_start TIME NOT NULL,  -- 30-minute slot start
     dentist_id INT NOT NULL,
+    status ENUM('available', 'booked') DEFAULT 'available',
     FOREIGN KEY (dentist_id) REFERENCES dentist(dentist_id)
 );
-
 -- Appointment Table
 CREATE TABLE appointment (
     appointment_id INT AUTO_INCREMENT PRIMARY KEY,
     patient_id INT NOT NULL,
     schedule_id INT NOT NULL,
-    service_id INT NOT NULL,
     status ENUM('Scheduled', 'Cancelled', 'Completed') DEFAULT 'Scheduled',
     notes TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (patient_id) REFERENCES patient(patient_id),
-    FOREIGN KEY (schedule_id) REFERENCES schedule(schedule_id),
-    FOREIGN KEY (service_id) REFERENCES service(service_id)
+    FOREIGN KEY (schedule_id) REFERENCES schedule(schedule_id)
 );
 
 CREATE TABLE call_script (
@@ -1231,8 +1228,8 @@ INSERT INTO schedule (date, shift, slot_start, dentist_id)
 VALUES ('2025-06-02', 'Afternoon', '18:30:00', 2);
 
 
-INSERT INTO appointment (patient_id, schedule_id, service_id, status, notes)
-VALUES (1, 1, 1, 'Scheduled', 'Initial cleaning appointment');
+INSERT INTO appointment (patient_id, schedule_id, status, notes)
+VALUES (1, 1, 'Scheduled', 'Initial cleaning appointment');
 
 
 INSERT INTO call_script (title, purpose, script_text, is_active)
