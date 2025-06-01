@@ -7,9 +7,9 @@ app = Flask(__name__)
 CORS(app)
 
 db_config = {
-    #'host': 'coffeehome.ca',
-    #'port': 3307,
-    'host': 'dental_clinic_db',
+    'host': 'coffeehome.ca',
+    'port': 3307,
+    #'host': 'dental_clinic_db',
     'user': 'clinicuser',
     'password': 'clinicpass',
     'database': 'dental_clinic'
@@ -129,40 +129,60 @@ def get_appointment(appointment_id):
 def get_next_available_times():
     data = request.json
     date = data.get("date")
-    shift = data.get("shift", "Anything")  # Default to no filter
+    operator = data.get("operator", "any").lower()  # "before", "after", or "any"
+    time = data.get("time", "00:00")  # default minimum time
 
     if not date:
         return jsonify({"success": False, "message": "Missing 'date' in request."}), 400
 
+    # Validate and convert time to HH:MM:SS format
+    try:
+        hour, minute = map(int, time.split(":"))
+        filter_time = f"{hour:02}:{minute:02}:00"
+    except:
+        return jsonify({"success": False, "message": "Invalid 'time' format. Use HH:MM."}), 400
+
     conn = get_db()
     cursor = conn.cursor()
 
-    # Dynamic query
-    if shift in ("Morning", "Afternoon"):
-        cursor.execute("""
-            SELECT DISTINCT date, slot_start
-            FROM schedule
-            WHERE status = 'available'
-              AND date >= %s
-              AND shift = %s
-            ORDER BY date ASC, slot_start ASC
-            LIMIT 3
-        """, (date, shift))
-    else:
-        cursor.execute("""
-            SELECT DISTINCT date, slot_start
-            FROM schedule
-            WHERE status = 'available'
-              AND date >= %s
-            ORDER BY date ASC, slot_start ASC
-            LIMIT 3
-        """, (date,))
+    base_query = """
+        SELECT DISTINCT date, slot_start
+        FROM schedule
+        WHERE status = 'available'
+          AND date >= %s
+    """
 
+    params = [date]
+
+    if operator == "before":
+        base_query += " AND slot_start < %s"
+        params.append(filter_time)
+    elif operator == "after":
+        base_query += " AND slot_start >= %s"
+        params.append(filter_time)
+
+    base_query += " ORDER BY date ASC, slot_start ASC LIMIT 3"
+
+    cursor.execute(base_query, params)
     rows = cursor.fetchall()
-    times = [f"{str(row[1])[:4]}" for row in rows]
-
     cursor.close()
     conn.close()
+
+    # Format results as "YYYY-MM-DD H:MM AM/PM"
+    times = []
+    for row in rows:
+        date_str = row[0].strftime("%Y-%m-%d") if hasattr(row[0], "strftime") else str(row[0])
+        total_seconds = int(row[1].total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes = remainder // 60
+
+        suffix = "AM" if hours < 12 or hours == 24 else "PM"
+        display_hour = hours % 12
+        if display_hour == 0:
+            display_hour = 12
+
+        time_str = f"{display_hour}:{minutes:02} {suffix}"
+        times.append(f"{time_str}")
 
     return jsonify({"success": True, "times": times}), 200
 
