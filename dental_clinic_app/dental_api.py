@@ -361,5 +361,66 @@ def reschedule_appointment_by_phone():
 
     return jsonify({"success": True, "message": "Appointment rescheduled."}), 200
 
+from datetime import datetime, date, timedelta
+
+@app.route("/schedule/generate_month", methods=["POST"])
+def generate_schedule_for_month():
+    data = request.json
+    month = data.get("month")
+    year = data.get("year")
+
+    if not month or not year:
+        return jsonify({"success": False, "message": "Missing 'month' or 'year'."}), 400
+
+    try:
+        month = int(month)
+        year = int(year)
+        start_date = date(year, month, 1)
+    except ValueError:
+        return jsonify({"success": False, "message": "Invalid month/year input."}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # Check if schedule already exists for this month
+    cursor.execute("""
+        SELECT COUNT(*) FROM schedule
+        WHERE MONTH(date) = %s AND YEAR(date) = %s
+    """, (month, year))
+    count = cursor.fetchone()[0]
+    if count > 0:
+        return jsonify({"success": False, "message": "Schedule for this month already exists."}), 400
+
+    # Get all dentists
+    cursor.execute("SELECT dentist_id FROM dentist")
+    dentists = cursor.fetchall()
+    if not dentists:
+        return jsonify({"success": False, "message": "No dentists found."}), 400
+
+    dentist_ids = [d[0] for d in dentists]
+    total_slots = 32  # 8:00 AM to 12:00 AM = 16 hours = 32 slots
+    dentist_pointer = 0
+    current_date = start_date
+
+    while current_date.month == month:
+        if current_date.weekday() < 5:  # Optional: skip weekends
+            assigned_dentist = dentist_ids[dentist_pointer % len(dentist_ids)]
+            for slot in range(total_slots):
+                hour = 8 + (slot * 30) // 60
+                minute = (slot * 30) % 60
+                time_seconds = hour * 3600 + minute * 60
+                cursor.execute("""
+                    INSERT INTO schedule (dentist_id, date, slot_start, status)
+                    VALUES (%s, %s, %s, 'available')
+                """, (assigned_dentist, current_date, timedelta(seconds=time_seconds)))
+            dentist_pointer += 1
+        current_date += timedelta(days=1)
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return jsonify({"success": True, "message": f"Schedule for {year}-{month:02d} created."}), 201
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)
