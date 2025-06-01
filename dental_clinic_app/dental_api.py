@@ -1,11 +1,14 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import mysql.connector
+from datetime import date, timedelta
 
 app = Flask(__name__)
 CORS(app)
 
 db_config = {
+    #'host': 'coffeehome.ca',
+    #'port': 3307,
     'host': 'dental_clinic_db',
     'user': 'clinicuser',
     'password': 'clinicpass',
@@ -206,6 +209,137 @@ def modify_patient():
 
     return jsonify({"success": True, "message": "Patient record updated."}), 200
 
+@app.route("/appointments/list/by_phone", methods=["POST"])
+def list_appointments_by_phone():
+    data = request.json
+    phone = data.get("phone")
+    if not phone:
+        return jsonify({"success": False, "message": "Missing phone number."}), 400
+
+    today_str = date.today().strftime("%Y-%m-%d")
+
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT a.appointment_id, a.schedule_id, a.status, a.notes,
+               s.date, s.slot_start
+        FROM appointment a
+        JOIN patient p ON a.patient_id = p.patient_id
+        JOIN schedule s ON a.schedule_id = s.schedule_id
+        WHERE p.phone = %s AND s.date >= %s
+        ORDER BY s.date ASC, s.slot_start ASC
+    """, (phone, today_str))
+    rows = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    # Format date as 'YYYY-MM-DD'
+    for row in rows:
+        if isinstance(row["date"], date):
+            row["date"] = row["date"].strftime("%Y-%m-%d")
+        if isinstance(row["slot_start"], timedelta):
+            total_seconds = int(row["slot_start"].total_seconds())
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes = remainder // 60
+            row["slot_start"] = f"{hours:02}:{minutes:02}"
+    print(rows)
+
+    return jsonify({"success": True, "appointments": rows}), 200
+
+
+@app.route("/appointments/cancel/by_phone", methods=["DELETE"]) # Cancel Appointment
+def cancel_appointment_by_phone():
+    data = request.json
+    phone = data.get("phone")
+    date = data.get("date")
+    time = data.get("time")
+
+    if not all([phone, date, time]):
+        return jsonify({"success": False, "message": "Missing phone, date, or time."}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT a.appointment_id, s.schedule_id
+        FROM appointment a
+        JOIN patient p ON a.patient_id = p.patient_id
+        JOIN schedule s ON a.schedule_id = s.schedule_id
+        WHERE p.phone = %s AND s.date = %s AND s.slot_start = %s AND s.date >= CURDATE()
+    """, (phone, date, time))
+    row = cursor.fetchone()
+
+    if not row:
+        return jsonify({"success": False, "message": "Appointment not found."}), 404
+
+    appointment_id, schedule_id = row
+
+    cursor.execute("UPDATE appointment SET status = 'Cancelled' WHERE appointment_id = %s", (appointment_id,))
+    cursor.execute("UPDATE schedule SET status = 'available' WHERE schedule_id = %s", (schedule_id,))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return jsonify({"success": True, "message": "Appointment cancelled."}), 200
+
+@app.route("/appointments/reschedule/by_phone", methods=["PUT"])
+def reschedule_appointment_by_phone():
+    data = request.json
+    phone = data.get("phone")
+    old_date = data.get("date")
+    old_time = data.get("time")
+    new_date = data.get("new_date")
+    new_time = data.get("new_time")
+    notes = data.get("notes")
+
+    if not all([phone, old_date, old_time, new_date, new_time]):
+        return jsonify({"success": False, "message": "Missing required fields for rescheduling."}), 400
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        SELECT a.appointment_id, s.schedule_id, p.patient_id
+        FROM appointment a
+        JOIN patient p ON a.patient_id = p.patient_id
+        JOIN schedule s ON a.schedule_id = s.schedule_id
+        WHERE p.phone = %s AND s.date = %s AND s.slot_start = %s AND s.date >= CURDATE()
+    """, (phone, old_date, old_time))
+    row = cursor.fetchone()
+
+    if not row:
+        return jsonify({"success": False, "message": "Current appointment not found."}), 404
+
+    appointment_id, old_schedule_id, patient_id = row
+
+    # Find new available slot
+    cursor.execute("""
+        SELECT schedule_id FROM schedule
+        WHERE date = %s AND slot_start = %s AND status = 'available'
+        LIMIT 1
+    """, (new_date, new_time))
+    new_schedule = cursor.fetchone()
+
+    if not new_schedule:
+        return jsonify({"success": False, "message": "No available slot found at the new date and time."}), 404
+
+    new_schedule_id = new_schedule[0]
+
+    # Cancel current, release slot, and book new
+    cursor.execute("UPDATE appointment SET status = 'Cancelled' WHERE appointment_id = %s", (appointment_id,))
+    cursor.execute("UPDATE schedule SET status = 'available' WHERE schedule_id = %s", (old_schedule_id,))
+    cursor.execute("""
+        INSERT INTO appointment (patient_id, schedule_id, status, notes)
+        VALUES (%s, %s, 'Scheduled', %s)
+    """, (patient_id, new_schedule_id, notes))
+    cursor.execute("UPDATE schedule SET status = 'booked' WHERE schedule_id = %s", (new_schedule_id,))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    return jsonify({"success": True, "message": "Appointment rescheduled."}), 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001, debug=True)
