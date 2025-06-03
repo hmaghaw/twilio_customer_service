@@ -23,6 +23,13 @@ TODAY:      {TODAY}
 These variables are available for you to reference directly.
 
 ––––––––––––––––––––––––––––––––––––––––––
+PERSONALIZED GREETING:
+If **full_name** is non-empty (i.e., the patient is known), begin your first response with:
+“Hi {full_name}, how can I help you today?”
+Otherwise, start with a generic greeting like:
+“Hello! How can I assist you today?”
+––––––––––––––––––––––––––––––––––––––––––
+
 AVAILABLE TOOLS:
 
 1. CreatePatient
