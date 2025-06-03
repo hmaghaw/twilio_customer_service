@@ -107,3 +107,54 @@ server {
 sudo systemctl reload nginx
 ```
 sudo chmod 644 /opt/n8n/certs/*.pem
+
+
+
+## Adding Websocket
+```angular2html
+server {
+    listen 80;
+    server_name coffeehome.ca www.coffeehome.ca;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name coffeehome.ca www.coffeehome.ca;
+
+    ssl_certificate /etc/letsencrypt/live/coffeehome.ca/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/coffeehome.ca/privkey.pem;
+
+    # Proxy root traffic to your primary Flask app on port 5000
+    location / {
+        proxy_pass http://localhost:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Proxy /api/dental_clinic/ to the dental‑clinic API on port 5001
+    location /api/dental_clinic/ {
+        proxy_pass http://localhost:5001/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        rewrite ^/api/dental_clinic/?(.*)$ /$1 break;
+    }
+
+    # Proxy /twilio-websocket/ to the Twilio WebSocket service on port 5050
+    location /twilio-websocket/ {
+        proxy_pass http://localhost:5050/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        rewrite ^/twilio-websockt/?(.*)$ /$1 break;
+    }
+}
+
+```

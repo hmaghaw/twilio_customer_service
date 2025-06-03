@@ -64,6 +64,20 @@ services:
       sh -c "pip install -r requirements.txt && python dental_api.py"
     restart: always
 
+  twilio_websocket:
+    image: python:3.11
+    container_name: twilio_websocket
+    working_dir: /app
+    volumes:
+      - ./twilio_websocket_app:/app
+    ports:
+      - "5050:5050"
+    depends_on:
+      - dental_clinic_db
+    command: >
+      sh -c "pip install -r requirements.txt && python main.py"
+    restart: always
+
 volumes:
   twilio_call_log_data:
   dental_clinic_data:
