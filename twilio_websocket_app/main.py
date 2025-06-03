@@ -51,7 +51,7 @@ async def handle_incoming_call(request: Request):
     response.say("O.K. you can start talking!")
     host = request.url.hostname
     connect = Connect()
-    connect.stream(url=f'wss://{host}/media-stream')
+    connect.stream(url=f'wss://{host}/twilio-websocket/media-stream')
     response.append(connect)
     return HTMLResponse(content=str(response), media_type="application/xml")
 
@@ -232,4 +232,4 @@ async def initialize_session(openai_ws):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=PORT)
+    uvicorn.run("main:app", host="0.0.0.0", port=PORT, reload=True, log_level="debug"  )
