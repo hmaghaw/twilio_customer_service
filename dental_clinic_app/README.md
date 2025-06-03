@@ -5,7 +5,7 @@ This API powers a dental clinic management system, allowing operations such as c
 ## Base URL
 
 ```
-https://<your-domain>/api/dental_clinic
+https://coffee_home.ca/api/dental_clinic
 ```
 
 ---
