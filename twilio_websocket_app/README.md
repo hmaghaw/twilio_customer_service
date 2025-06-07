@@ -1,61 +1,122 @@
-#  Speech Assistant with Twilio Voice and the OpenAI Realtime API (Python)
+# Twilio Media Stream ↔ OpenAI Realtime Bridge
 
-This application demonstrates how to use Python, [Twilio Voice](https://www.twilio.com/docs/voice) and [Media Streams](https://www.twilio.com/docs/voice/media-streams), and [OpenAI's Realtime API](https://platform.openai.com/docs/) to make a phone call to speak with an AI Assistant. 
+An async FastAPI service that connects incoming Twilio Media Streams to OpenAI’s Realtime API (gpt-4o-realtime-preview). Enables live, bidirectional voice conversations between callers and an AI assistant.
 
-The application opens websockets with the OpenAI Realtime API and Twilio, and sends voice audio from one to the other to enable a two-way conversation.
+## Features
 
-See [here](https://www.twilio.com/en-us/blog/voice-ai-assistant-openai-realtime-api-python) for a tutorial overview of the code.
+- **FastAPI HTTP & WebSocket**  
+  - `GET /` health check  
+  - `POST/GET /incoming-call` returns TwiML to start a Twilio media stream  
+  - `WS /media-stream` bridges audio between Twilio and OpenAI  
+- **Voice & Text Modalities**  
+  - Full-duplex G.711 μ-law audio  
+  - Real-time transcript logging (`response.content.text` & `.done`)  
+- **Server-side VAD & Truncation**  
+  - Interrupts AI playback when user starts speaking  
+  - Sends “marks” for alignment and handles truncation events  
+- **Configurable Prompt & Voice**  
+  - Load your system instructions from `sample_prompt.txt`  
+  - Choose built-in OpenAI voice via `VOICE` env var  
+- **Structured Logging**  
+  - Uses Python `logging` for key lifecycle events  
+  - Optional silencing of low-level websockets/uvicorn debug logs  
 
-This application uses the following Twilio products in conjunction with OpenAI's Realtime API:
-- Voice (and TwiML, Media Streams)
-- Phone Numbers
+---
 
-> [!NOTE]
-> Outbound calling is beyond the scope of this app. However, we demoed [one way to do it here](https://www.twilio.com/en-us/blog/outbound-calls-python-openai-realtime-api-voice).
+## Getting Started
 
-## Prerequisites
+### Prerequisites
 
-To use the app, you will  need:
+- Python 3.10+  
+- An OpenAI API key with Realtime access  
+- Twilio account (for Media Streams)  
+- `ngrok` or public HTTPS endpoint for Twilio callbacks  
 
-- **Python 3.9+** We used \`3.9.13\` for development; download from [here](https://www.python.org/downloads/).
-- **A Twilio account.** You can sign up for a free trial [here](https://www.twilio.com/try-twilio).
-- **A Twilio number with _Voice_ capabilities.** [Here are instructions](https://help.twilio.com/articles/223135247-How-to-Search-for-and-Buy-a-Twilio-Phone-Number-from-Console) to purchase a phone number.
-- **An OpenAI account and an OpenAI API Key.** You can sign up [here](https://platform.openai.com/).
-  - **OpenAI Realtime API access.**
+### Install
 
-## Server Setup
-This part is taken care of in docker-compor and the nginx setup
-### Twilio setup
-
-#### Point a Phone Number to your ngrok URL
-In the [Twilio Console](https://console.twilio.com/), go to **Phone Numbers** > **Manage** > **Active Numbers** and click on the additional phone number you purchased for this app in the **Prerequisites**.
-
-In your Phone Number configuration settings, update the first **A call comes in** dropdown to **Webhook**, and paste your ngrok forwarding URL (referenced above), followed by `/incoming-call`. For example, `https://[your-ngrok-subdomain].ngrok.app/incoming-call`. Then, click **Save configuration**.
-
-### Update the .env file
-
-Create a `/env` file, or copy the `.env.example` file to `.env`:
-
+```bash
+git clone https://github.com/your-org/twilio-openai-realtime.git
+cd twilio-openai-realtime
+pip install -r requirements.txt
 ```
-cp .env.example .env
+
+### Configuration
+
+Create a `.env` in the project root:
+
+```dotenv
+OPENAI_API_KEY=sk-...
+PORT=5050
+VOICE=alloy           # (optional) any supported voice
 ```
 
-In the .env file, update the `OPENAI_API_KEY` to your OpenAI API key from the **Prerequisites**.
+Place your assistant’s instructions in `sample_prompt.txt` (UTF-8).
 
-## Run the app
-Once ngrok is running, dependencies are installed, Twilio is configured properly, and the `.env` is set up, run the dev server with the following command:
+### Running Locally
+
+```bash
+uvicorn main:app   --host 0.0.0.0   --port $PORT   --reload
 ```
-python main.py
-```
-## Test the app
-With the development server running, call the phone number you purchased in the **Prerequisites**. After the introduction, you should be able to talk to the AI Assistant. Have fun!
 
-## Special features
+---
 
-### Have the AI speak first
-To have the AI voice assistant talk before the user, uncomment the line `# await send_initial_conversation_item(openai_ws)`. The initial greeting is controlled in `async def send_initial_conversation_item(openai_ws)`.
+## How It Works
 
-### Interrupt handling/AI preemption
-When the user speaks and OpenAI sends `input_audio_buffer.speech_started`, the code will clear the Twilio Media Streams buffer and send OpenAI `conversation.item.truncate`.
+1. **Incoming Call**  
+   Twilio sends the call to `/incoming-call`. We reply with TwiML that speaks a prompt then opens a WebSocket to `/media-stream`.
 
-Depending on your application's needs, you may want to use the [`input_audio_buffer.speech_stopped`](https://platform.openai.com/docs/api-reference/realtime-server-events/input-audio-buffer-speech-stopped) event, instead, or a combination of the two.
+2. **WebSocket Media Stream**  
+   - Accept Twilio’s WebSocket (`twilio_ws`)  
+   - Dial out to OpenAI’s Realtime WebSocket (`openai_ws`)  
+   - In parallel:  
+     - **receive_from_twilio** → forward Twilio’s `media` frames as `input_audio_buffer.append` to OpenAI  
+     - **send_to_twilio** → forward OpenAI’s `response.audio.delta` frames as Twilio `media` events  
+   - Handle VAD interrupts: when `input_audio_buffer.speech_started` arrives, truncate AI audio and drop queued buffers.
+
+3. **Transcript Logging**  
+   Partial text (`response.content.text`) and final text (`response.content.done`) events are printed/logged for debugging or storage.
+
+---
+
+## Project Structure
+
+\`\`\`
+.
+├── main.py           # FastAPI app & session logic
+├── sample_prompt.txt # Your assistant’s system instructions
+├── requirements.txt  # Python dependencies
+├── .env              # Environment variables (gitignored)
+└── README.md         # This file
+\`\`\`
+
+---
+
+## Extending & Customization
+
+- **Custom “first prompt”**  
+  Uncomment and modify \`send_initial_conversation_item()\` to have the AI speak first.  
+- **Logging Levels**  
+  Adjust or silence \`websockets\` / \`uvicorn\` logs via the commented \`logging.getLogger(...)\` lines.  
+- **VAD Tuning**  
+  Swap \`server_vad\` for a different turn-detection method or configure \`SHOW_TIMING_MATH\` for debug math prints.  
+- **Voice Models**  
+  Change \`VOICE\` to any voice supported by your OpenAI beta region.  
+
+---
+
+## Troubleshooting
+
+- **WebSocket Failures**  
+  Ensure your OpenAI key has \`realtime\` access and that you include the \`"OpenAI-Beta": "realtime=v1"\` header.  
+- **Twilio Connection Errors**  
+  Make sure your \`/incoming-call\` URL is reachable via HTTPS (use \`ngrok\` in dev).  
+- **Audio Artefacts**  
+  Verify both input/output formats are set to \`"g711_ulaw"\`.  
+
+---
+
+## License
+
+[MIT License](LICENSE)
+
+> _Happy coding—and may your AI voice assistant never drop a packet!_
